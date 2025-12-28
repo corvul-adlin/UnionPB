@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: corvul-pixel-battle
+    name: union-pixel-battle
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
