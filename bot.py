@@ -9,35 +9,40 @@ from aiogram.filters import Command
 from PIL import Image, ImageColor, ImageDraw
 from aiohttp import web
 
-# --- CONFIG ---
+# --- КОНФИГУРАЦИЯ ---
+# Достаем токены из переменных окружения Render
 TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 PORT = int(os.getenv("PORT", 10000))
 
+# Проверка на наличие критических данных
 if not TOKEN or not CHANNEL_ID:
-    logging.critical("CRITICAL ERROR: Environment variables missing!")
+    logging.critical("ОШИБКА: Проверь переменные BOT_TOKEN и CHANNEL_ID!")
     sys.exit(1)
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
+# Инициализация холста 1024x1024
 CANVAS_SIZE = 1024
 canvas = Image.new('RGB', (CANVAS_SIZE, CANVAS_SIZE), color='white')
 
-# --- ENGINE MATH ---
+# --- ИНЖЕНЕРНЫЕ ФУНКЦИИ ---
+
 def fix_y(y_user):
-    """Bottom-left coordinate system transform."""
+    """Математика: переворачиваем Y, чтобы (0,0) был внизу слева."""
     return CANVAS_SIZE - 1 - int(y_user)
 
-def get_emoji(color_name):
-    mapping = {
-        "black": "⬛", "white": "⬜", "red": "🟥", "blue": "🟦",
-        "yellow": "🟨", "green": "🟩", "orange": "🟧", "purple": "🟪"
-    }
-    return mapping.get(color_name.lower(), "🟦")
+async def send_canvas_photo(message, caption):
+    """Универсальная функция для отправки фото холста с текстом."""
+    with io.BytesIO() as out:
+        canvas.save(out, format="PNG")
+        out.seek(0)
+        photo = types.BufferedInputFile(out.read(), filename="update.png")
+        await message.answer_photo(photo=photo, caption=caption)
 
-# --- DATABASE / BACKUP ---
 async def load_last_canvas():
+    """Загрузка последнего состояния из канала при перезапуске."""
     global canvas
     try:
         async for message in bot.get_chat_history(CHANNEL_ID, limit=10):
@@ -47,9 +52,10 @@ async def load_last_canvas():
                 canvas = Image.open(file_content).convert('RGB')
                 return
     except Exception as e:
-        logging.error(f"Load error: {e}")
+        logging.error(f"Ошибка загрузки бэкапа: {e}")
 
 async def backup_to_channel():
+    """Тихое сохранение холста в канал."""
     try:
         with io.BytesIO() as out:
             canvas.save(out, format="PNG")
@@ -57,17 +63,33 @@ async def backup_to_channel():
             file = types.BufferedInputFile(out.read(), filename="matrix.png")
             await bot.send_document(CHANNEL_ID, file, caption="UnionPB 3.7 Auto-Backup", disable_notification=True)
     except Exception as e:
-        logging.error(f"Backup error: {e}")
+        logging.error(f"Ошибка бэкапа: {e}")
 
-# --- HANDLERS ---
+# --- ОБРАБОТЧИКИ КОМАНД ---
+
+@dp.message(Command("start", "help"))
+async def start_handler(message: types.Message):
+    """ТО, ЧЕГО НЕ ХВАТАЛО: Ответ на /start."""
+    text = (
+        "🚀 **UnionPB v3.7 запущен!**\n\n"
+        "Я готов рисовать. Координаты (0,0) — снизу слева.\n"
+        "**Команды:**\n"
+        "• `/add цвет x y` — точка\n"
+        "• `/line цвет x1 y1 x2 y2` — линия\n"
+        "• `/circle цвет x y r` — круг\n"
+        "• `/fill цвет x1 y1 x2 y2` — заливка\n"
+        "• `/view` — всё полотно"
+    )
+    await message.answer(text, parse_mode="Markdown")
 
 @dp.message(Command("add"))
 async def add_handler(message: types.Message):
+    """Добавление точек с визуальным отчетом."""
     lines = message.text.split('\n')
     success = 0
     for i, line in enumerate(lines):
         parts = line.split()
-        if i == 0: parts = parts[1:]
+        if i == 0: parts = parts[1:] # Убираем саму команду /add
         if len(parts) != 3: continue
         try:
             color, x, y_raw = parts[0], int(parts[1]), int(parts[2])
@@ -76,72 +98,64 @@ async def add_handler(message: types.Message):
                 canvas.putpixel((x, y), ImageColor.getrgb(color))
                 success += 1
         except: continue
+    
     if success > 0:
         asyncio.create_task(backup_to_channel())
-        await message.answer(f"✅ Добавлено пикселей: {success}")
+        await send_canvas_photo(message, f"✅ Добавлено пикселей: {success}")
+    else:
+        await message.answer("❌ Ошибка ввода! Пример: `/add red 500 500`")
 
 @dp.message(Command("line"))
 async def line_handler(message: types.Message):
-    """Draws a line between two points."""
+    """Рисование линии с отчетом."""
     try:
         p = message.text.split()
-        color = p[1]
-        x1, y1 = int(p[2]), fix_y(p[3])
-        x2, y2 = int(p[4]), fix_y(p[5])
-        
+        color, x1, y1_r, x2, y2_r = p[1], int(p[2]), int(p[3]), int(p[4]), int(p[5])
         draw = ImageDraw.Draw(canvas)
-        draw.line([x1, y1, x2, y2], fill=ImageColor.getrgb(color), width=1)
+        draw.line([x1, fix_y(y1_r), x2, fix_y(y2_r)], fill=ImageColor.getrgb(color), width=1)
         
-        await message.answer(f"📏 Линия ({color}) проведена!")
         asyncio.create_task(backup_to_channel())
-    except Exception as e:
+        await send_canvas_photo(message, f"📏 Линия ({color}) проведена!")
+    except:
         await message.answer("Ошибка! `/line color x1 y1 x2 y2`")
 
 @dp.message(Command("circle"))
 async def circle_handler(message: types.Message):
-    """Draws an empty circle."""
+    """Рисование круга с отчетом."""
     try:
         p = message.text.split()
-        color, cx, cy_raw, r = p[1], int(p[2]), int(p[3]), int(p[4])
-        cy = fix_y(cy_raw)
-        
+        color, cx, cy_r, r = p[1], int(p[2]), int(p[3]), int(p[4])
+        cy = fix_y(cy_r)
         draw = ImageDraw.Draw(canvas)
         draw.ellipse([cx-r, cy-r, cx+r, cy+r], outline=ImageColor.getrgb(color))
         
-        await message.answer(f"⭕ Окружность ({color}) готова!")
         asyncio.create_task(backup_to_channel())
+        await send_canvas_photo(message, f"⭕ Окружность ({color}) готова!")
     except:
         await message.answer("Ошибка! `/circle color x y radius`")
 
-@dp.message(Command("point"))
-async def point_handler(message: types.Message):
-    """Get color of a specific pixel."""
-    try:
-        p = message.text.split()
-        x, y_raw = int(p[1]), int(p[2])
-        y = fix_y(y_raw)
-        rgb = canvas.getpixel((x, y))
-        await message.answer(f"📍 Точка {x}:{y_raw}\nЦвет (RGB): `{rgb}`")
-    except:
-        await message.answer("Ошибка! `/point x y`")
-
 @dp.message(Command("fill"))
 async def fill_handler(message: types.Message):
+    """Заливка области с отчетом."""
     try:
         p = message.text.split()
-        color = p[1]
-        x1, y1, x2, y2 = int(p[2]), fix_y(p[3]), int(p[4]), fix_y(p[5])
+        color, x1, y1_r, x2, y2_r = p[1], int(p[2]), int(p[3]), int(p[4]), int(p[5])
         draw = ImageDraw.Draw(canvas)
-        draw.rectangle([min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)], fill=ImageColor.getrgb(color))
+        draw.rectangle([min(x1, x2), min(fix_y(y1_r), fix_y(y2_r)), max(x1, x2), max(fix_y(y1_r), fix_y(y2_r))], fill=ImageColor.getrgb(color))
         
-        em = get_emoji(color)
-        await message.answer(f"✅ Заливка {em} завершена!")
         asyncio.create_task(backup_to_channel())
+        await send_canvas_photo(message, f"✅ Область залита цветом {color}!")
     except:
         await message.answer("Ошибка! `/fill color x1 y1 x2 y2`")
 
+@dp.message(Command("view"))
+async def view_handler(message: types.Message):
+    """Просмотр всего полотна."""
+    await send_canvas_photo(message, "🖼 Текущее состояние UnionPB")
+
 @dp.message(Command("zoom"))
 async def zoom_handler(message: types.Message):
+    """Увеличение области."""
     try:
         p = message.text.split()
         cx, cy = int(p[1]), fix_y(p[2])
@@ -150,25 +164,23 @@ async def zoom_handler(message: types.Message):
         with io.BytesIO() as out:
             zoomed.save(out, format="PNG")
             out.seek(0)
-            await message.answer_photo(photo=types.BufferedInputFile(out.read(), filename="z.png"))
+            await message.answer_photo(photo=types.BufferedInputFile(out.read(), filename="z.png"), caption=f"🔍 Зум {p[1]}:{p[2]}")
     except:
-        await message.answer("Ошибка зума!")
+        await message.answer("Ошибка! `/zoom x y`")
 
-@dp.message(Command("view"))
-async def view_handler(message: types.Message):
-    with io.BytesIO() as out:
-        canvas.save(out, format="PNG")
-        out.seek(0)
-        await message.answer_photo(photo=types.BufferedInputFile(out.read(), filename="c.png"))
+# --- ЗАПУСК ---
 
 async def main():
     logging.basicConfig(level=logging.INFO)
+    
+    # Веб-сервер для Render (чтобы не засыпал)
     app = web.Application()
     app.router.add_get("/", lambda r: web.Response(text="UnionPB 3.7 Online"))
     runner = web.AppRunner(app)
     await runner.setup()
     await web.TCPSite(runner, '0.0.0.0', PORT).start()
-    await load_last_canvas()
+    
+    await load_last_canvas() # Загружаем старое полотно
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
