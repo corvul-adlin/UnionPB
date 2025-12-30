@@ -1,4 +1,4 @@
-# 🎨 UnionPB v3.7 (Professional Edition)
+# 🎨 UnionPB v3.7 Stable (Professional Edition)
 
 Ультимативный Telegram-бот для совместного рисования на холсте 1024x1024.
 
