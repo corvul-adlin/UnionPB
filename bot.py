@@ -78,7 +78,6 @@ async def start_handler(message: types.Message):
         "• `/line цвет x1 y1 x2 y2` — линия\n"
         "• `/circle цвет x y r` — круг\n"
         "• `/fill цвет x1 y1 x2 y2` — заливка\n"
-        "• `/zoom x y` — увеличить сектор 50х50 пикселей\n"
         "• `/view` — всё полотно"
     )
     await message.answer(text, parse_mode="Markdown")
