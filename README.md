@@ -19,7 +19,6 @@
 | `/line` | Провести линию | `/line red x1 y1 x2 y2` |
 | `/circle` | Нарисовать окружность | `/circle blue x y radius` |
 | `/fill` | Заливка прямоугольника | `/fill green x1 y1 x2 y2` |
-| `/point` | Узнать цвет точки | `/point x y` |
 | `/zoom` | Увеличить область | `/zoom x y` |
 | `/view` | Весь холст | `/view` |
 
